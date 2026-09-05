@@ -23,6 +23,7 @@ const { createBot, setupBotMenu } = require('../src/bot');
 const WEBHOOK_PATH = process.env.WEBHOOK_PATH || '/tg-webhook/vercel';
 
 let app = null;
+let initPromise = null;
 
 function webhookBaseUrl() {
   if (process.env.WEBHOOK_URL) return process.env.WEBHOOK_URL.replace(/\/$/, '');
@@ -30,24 +31,33 @@ function webhookBaseUrl() {
   return null;
 }
 
-function getApp() {
-  if (app) return app;
-  const db = openDb();
-  const server = createServer(db);
-  const bot = createBot(db);
-  server.use(bot.webhookCallback(WEBHOOK_PATH));
-  const base = webhookBaseUrl();
-  if (base) {
-    bot.telegram
-      .setWebhook(base + WEBHOOK_PATH)
-      .then(() => setupBotMenu(bot))
-      .then(() => console.log('Webhook set:', base + WEBHOOK_PATH))
-      .catch((e) => console.error('setWebhook failed:', e.message));
-  } else {
-    console.error('WEBHOOK_URL/VERCEL_URL is not set — bot will not receive updates');
+// First request awaits Telegram setup (setWebhook must finish before the
+// serverless instance freezes after the response). Warm requests reuse app.
+function init() {
+  if (app) return Promise.resolve(app);
+  if (!initPromise) {
+    initPromise = (async () => {
+      const db = openDb();
+      const server = createServer(db);
+      const bot = createBot(db);
+      server.use(bot.webhookCallback(WEBHOOK_PATH));
+      const base = webhookBaseUrl();
+      if (base) {
+        try {
+          await bot.telegram.setWebhook(base + WEBHOOK_PATH);
+          await setupBotMenu(bot);
+          console.log('Webhook set:', base + WEBHOOK_PATH);
+        } catch (e) {
+          console.error('setWebhook failed:', e.message);
+        }
+      } else {
+        console.error('WEBHOOK_URL/VERCEL_URL is not set — bot will not receive updates');
+      }
+      app = server;
+      return app;
+    })();
   }
-  app = server;
-  return app;
+  return initPromise;
 }
 
-module.exports = (req, res) => getApp()(req, res);
+module.exports = (req, res) => init().then((a) => a(req, res));

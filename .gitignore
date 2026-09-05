@@ -7,3 +7,5 @@ node_modules/
 data/
 .vercel
 .DS_Store
+
+.vercel
