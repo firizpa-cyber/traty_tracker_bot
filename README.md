@@ -96,6 +96,21 @@ docker build -t expense-tracker .
 docker run -p 3000:3000 --env-file .env -v exp-data:/app/data expense-tracker
 ```
 
+**Vercel:** проект готов к деплою из коробки (`api/index.js` + `vercel.json`, бот в webhook-режиме).
+
+```bash
+vercel          # preview-деплой
+vercel --prod   # продакшен
+```
+
+Затем в dashboard проекта (Settings → Environment Variables) задать:
+`BOT_TOKEN`, `JWT_SECRET`, `PUBLIC_URL=https://<ваш-домен>.vercel.app`,
+`BASE_CURRENCY=TJS`, `DEFAULT_CURRENCY=TJS`, `RATES_JSON={"USD":10.9,"EUR":11.8,"RUB":0.12,"TJS":1}`,
+`TIMEZONE=Asia/Dushanbe`, `BOT_USERNAME=<username_бота>`.
+Webhook на Telegram ставится автоматически при первом запросе. После смены env vars сделайте redeploy.
+
+> ⚠️ Serverless без постоянного диска: SQLite живёт в `/tmp` и сбрасывается при редеплое/cold start. Для демо хватает; для настоящих данных используйте Render/Docker с volume (ниже) или внешнюю БД.
+
 **Webhook-режим** (если хостинг не держит долгие соединения): `BOT_MODE=webhook`, `WEBHOOK_URL=https://…`, `WEBHOOK_PATH=/tg-webhook/secret`.
 
 ## 📱 Бот

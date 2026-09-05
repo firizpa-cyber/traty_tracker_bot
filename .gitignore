@@ -5,4 +5,5 @@ node_modules/
 *.db-wal
 *.db-shm
 data/
+.vercel
 .DS_Store
