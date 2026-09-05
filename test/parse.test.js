@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { parseExpense, extractAmount, splitExpenseParts, cleanDescription } = require('../src/parse');
+const { parseExpense, extractAmount, splitExpenseParts, cleanDescription, parseReceiptTotal } = require('../src/parse');
 
 const OPTS = { defaultCurrency: 'TJS', baseCurrency: 'TJS', rates: { TJS: 1, USD: 10.9, EUR: 11.8, RUB: 0.12 } };
 
@@ -85,4 +85,27 @@ test('splitExpenseParts: two at once', () => {
 test('cleanDescription strips fillers and prepositions', () => {
   assert.equal(cleanDescription('потратил на такси'), 'такси');
   assert.equal(cleanDescription('заплатил за обед'), 'обед');
+});
+
+test('receipt total: итого line wins', () => {
+  const p = parseReceiptTotal('Магазин\nХлеб 120\nМолоко 200\nИТОГО 1 250\nОплата картой', OPTS);
+  assert.equal(p.ok, true);
+  assert.equal(p.amount, 1250);
+});
+
+test('receipt total: hinted small beats unhinted big', () => {
+  const p = parseReceiptTotal('TOTAL: $12.50\nCASH 50.00', OPTS);
+  assert.equal(p.ok, true);
+  assert.equal(p.amount, 12.5);
+  assert.equal(p.currency, 'USD');
+});
+
+test('receipt total: falls back to max amount', () => {
+  const p = parseReceiptTotal('120\n340\n25', OPTS);
+  assert.equal(p.ok, true);
+  assert.equal(p.amount, 340);
+});
+
+test('receipt total: garbage fails', () => {
+  assert.equal(parseReceiptTotal('нет цифр тут', OPTS).ok, false);
 });

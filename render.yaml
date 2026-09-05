@@ -22,3 +22,5 @@ services:
         value: '{"USD":10.9,"EUR":11.8,"RUB":0.12,"TJS":1}'
       - key: TIMEZONE
         value: Asia/Dushanbe
+      - key: DATABASE_URL
+        sync: false

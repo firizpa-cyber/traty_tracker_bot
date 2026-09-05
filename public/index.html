@@ -34,81 +34,129 @@
         <div id="me-label" class="muted small">—</div>
       </div>
       <button id="btn-next" class="icon-btn" aria-label="Следующий месяц">›</button>
-      <button id="btn-export" class="icon-btn" aria-label="Скачать CSV" title="Скачать CSV">⭳</button>
-      <button id="btn-logout" class="icon-btn ghost" aria-label="Выйти" title="Выйти">⏻</button>
     </header>
 
     <main class="wrap">
       <div id="expand-hint" class="hidden">⬆️ Потяните вверх, чтобы развернуть на весь экран</div>
 
-      <section class="hero">
-        <div class="hero-label">Потрачено <span id="hero-month">в этом месяце</span></div>
-        <div id="t-month" class="hero-val">—</div>
-        <div id="t-count" class="hero-sub muted">—</div>
-      </section>
+      <div class="view" id="view-home">
+        <section class="hero">
+          <div class="hero-label">Потрачено <span id="hero-month">в этом месяце</span></div>
+          <div id="t-month" class="hero-val">—</div>
+          <div id="t-count" class="hero-sub muted">—</div>
+        </section>
 
-      <section class="totals">
-        <div class="total-card"><div class="t-label">Сегодня</div><div id="t-today" class="t-val">—</div><div class="t-sub">потрачено</div></div>
-        <div class="total-card"><div class="t-label">Неделя</div><div id="t-week" class="t-val">—</div><div class="t-sub">с понедельника</div></div>
-      </section>
+        <section class="totals">
+          <div class="total-card"><div class="t-label">Сегодня</div><div id="t-today" class="t-val">—</div><div class="t-sub">потрачено</div></div>
+          <div class="total-card"><div class="t-label">Неделя</div><div id="t-week" class="t-val">—</div><div class="t-sub">с понедельника</div></div>
+        </section>
 
-      <section id="onboarding" class="card guide hidden">
-        <h2>👋 Как это работает</h2>
-        <ol>
-          <li>Напишите трату строкой ниже — например <b>кофе 350</b></li>
-          <li>Категория определится сама, сумма попадёт в графики</li>
-          <li>В боте так же: одна строка — одна трата</li>
-        </ol>
-        <div class="muted small">Нажмите на пример, чтобы попробовать:</div>
-      </section>
+        <section id="onboarding" class="card guide hidden">
+          <h2>👋 Как это работает</h2>
+          <ol>
+            <li>Напишите трату строкой ниже — например <b>кофе 350</b></li>
+            <li>Категория определится сама, сумма попадёт в графики</li>
+            <li>В боте так же: одна строка — одна трата</li>
+          </ol>
+          <div class="muted small">Нажмите на пример, чтобы попробовать:</div>
+        </section>
 
-      <section class="card">
-        <h2>➕ Новая трата</h2>
-        <p class="card-sub">Сумма и что купили — одним сообщением</p>
-        <form id="quick-form" class="quick">
-          <input id="quick-input" inputmode="text" autocomplete="off" placeholder="кофе 350" />
-          <button class="btn" type="submit">Записать</button>
-        </form>
-        <div class="chips">
-          <button class="chip" data-ex="кофе 350">☕ кофе 350</button>
-          <button class="chip" data-ex="такси 900">🚕 такси 900</button>
-          <button class="chip" data-ex="обед 1 200">🍽 обед 1 200</button>
-          <button class="chip" data-ex="продукты 2 500">🛒 продукты 2 500</button>
-        </div>
-        <div id="quick-err" class="err"></div>
-      </section>
-
-      <section class="card">
-        <h2>📊 По дням</h2>
-        <p class="card-sub">Каждый столбик — один день месяца</p>
-        <canvas id="chart-days" height="140"></canvas>
-        <div id="days-empty" class="empty hidden">Здесь появятся столбики, когда запишете первую трату 👆</div>
-      </section>
-
-      <section class="card">
-        <div class="row-between">
-          <div>
-            <h2>🗂 По категориям</h2>
-            <p class="card-sub">Доля от всех трат месяца</p>
+        <section class="card">
+          <h2>➕ Новая трата</h2>
+          <p class="card-sub">Сумма и что купили — одним сообщением</p>
+          <form id="quick-form" class="quick">
+            <input id="quick-input" inputmode="text" autocomplete="off" placeholder="кофе 350" />
+            <button class="btn" type="submit">Записать</button>
+          </form>
+          <div class="chips">
+            <button class="chip" data-ex="кофе 350">☕ кофе 350</button>
+            <button class="chip" data-ex="такси 900">🚕 такси 900</button>
+            <button class="chip" data-ex="обед 1 200">🍽 обед 1 200</button>
+            <button class="chip" data-ex="продукты 2 500">🛒 продукты 2 500</button>
           </div>
-          <button id="btn-limits" class="btn small secondary">Лимиты</button>
-        </div>
-        <div id="cats"></div>
-        <div id="limits-form" class="hidden">
-          <p class="card-sub">Лимит на месяц в основной валюте. Бот предупредит, когда потратите 80% и при превышении.</p>
-          <div id="limits-rows"></div>
-          <button id="btn-limits-save" class="btn small">Сохранить лимиты</button>
-        </div>
-      </section>
+          <div id="quick-err" class="err"></div>
+        </section>
+      </div>
 
-      <section class="card">
-        <h2>🧾 История</h2>
-        <p class="card-sub">Нажмите «Изменить», чтобы поправить запись</p>
-        <input id="search" placeholder="🔍 Поиск по записям…" autocomplete="off" />
-        <div id="list"></div>
-        <button id="btn-more" class="btn secondary hidden">Показать ещё</button>
-      </section>
+      <div class="view hidden" id="view-stats">
+        <section class="card">
+          <h2>📊 По дням</h2>
+          <p class="card-sub">Каждый столбик — один день месяца</p>
+          <canvas id="chart-days" height="140"></canvas>
+          <div id="days-empty" class="empty hidden">Здесь появятся столбики, когда запишете первую трату 👆</div>
+        </section>
+
+        <section class="card">
+          <div class="row-between">
+            <div>
+              <h2>🗂 По категориям</h2>
+              <p class="card-sub">Доля от всех трат месяца</p>
+            </div>
+            <button id="btn-limits" class="btn small secondary">Лимиты</button>
+          </div>
+          <div id="cats"></div>
+          <div id="limits-form" class="hidden">
+            <p class="card-sub" id="limits-cap">Лимит на месяц. Бот предупредит, когда потратите 80% и при превышении.</p>
+            <div id="limits-rows"></div>
+            <button id="btn-limits-save" class="btn small">Сохранить лимиты</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="view hidden" id="view-history">
+        <section class="card">
+          <h2>🧾 История</h2>
+          <p class="card-sub">Сгруппировано по дням. Нажмите «Изменить», чтобы поправить запись</p>
+          <div class="row">
+            <input id="search" placeholder="🔍 Поиск…" autocomplete="off" />
+          </div>
+          <div class="row">
+            <select id="fcat" aria-label="Фильтр по категории"></select>
+          </div>
+          <div id="list"></div>
+          <button id="btn-more" class="btn secondary hidden">Показать ещё</button>
+        </section>
+      </div>
+
+      <div class="view hidden" id="view-more">
+        <section class="card">
+          <h2>📤 Выписка</h2>
+          <p class="card-sub">Траты за выбранный месяц — в файл или в Google Sheets</p>
+          <div class="row">
+            <button id="btn-export" class="btn secondary">Скачать CSV</button>
+            <button id="btn-sheets" class="btn secondary hidden">В Google Sheets</button>
+          </div>
+          <div id="sheets-msg" class="muted small" style="margin-top:8px"></div>
+        </section>
+
+        <section class="card">
+          <h2>👥 Общий бюджет</h2>
+          <p class="card-sub">Объедините траты с партнёром — общие итоги в боте (/shared) и строкой ниже</p>
+          <div id="pair-box"><div class="muted small">Загрузка…</div></div>
+        </section>
+
+        <section class="card">
+          <h2>👤 Вход</h2>
+          <p class="card-sub" id="me-full">—</p>
+          <div class="row">
+            <button id="btn-logout" class="btn ghost">Выйти из панели</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>ℹ️ О приложении</h2>
+          <p class="card-sub" id="store-label">—</p>
+          <p class="card-sub">Одна строка в боте — одна трата. Категория определяется сама. Данные видите только вы.</p>
+        </section>
+      </div>
     </main>
+
+    <nav class="tabbar">
+      <button class="tab active" data-tab="home"><span class="tab-ico">🏠</span><span class="tab-txt">Главная</span></button>
+      <button class="tab" data-tab="stats"><span class="tab-ico">📊</span><span class="tab-txt">Статистика</span></button>
+      <button class="tab" data-tab="history"><span class="tab-ico">🧾</span><span class="tab-txt">История</span></button>
+      <button class="tab" data-tab="more"><span class="tab-ico">⋯</span><span class="tab-txt">Ещё</span></button>
+    </nav>
   </div>
 
   <div id="modal" class="modal hidden">

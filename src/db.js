@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -81,6 +82,16 @@ function openDb(dataDir) {
       category TEXT NOT NULL,
       amount_base REAL NOT NULL,
       PRIMARY KEY (tg_id, category)
+    );
+    CREATE TABLE IF NOT EXISTS pairs (
+      tg_id INTEGER PRIMARY KEY,
+      partner_tg_id INTEGER NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS pair_codes (
+      code TEXT PRIMARY KEY,
+      owner_tg_id INTEGER NOT NULL,
+      expires_at TEXT NOT NULL
     );
   `);
   // Light migration: older DBs may miss columns.
@@ -209,6 +220,79 @@ function getLimit(db, tgId, category) {
   return row ? row.amount_base : null;
 }
 
+// --- Shared budget for two ---
+const PAIR_TTL_MS = 15 * 60 * 1000;
+
+function createPairCode(db, ownerTgId) {
+  db.prepare('DELETE FROM pair_codes WHERE owner_tg_id = ? OR expires_at <= ?').run(ownerTgId, nowIso());
+  const code = String(crypto.randomInt(100000, 1000000));
+  const expiresAt = new Date(Date.now() + PAIR_TTL_MS).toISOString();
+  db.prepare('INSERT INTO pair_codes (code, owner_tg_id, expires_at) VALUES (?, ?, ?)').run(code, ownerTgId, expiresAt);
+  return { code, expiresAt };
+}
+
+function getPair(db, tgId) {
+  return (
+    db.prepare(
+      `SELECT p.partner_tg_id AS tg_id, u.first_name, u.username
+       FROM pairs p LEFT JOIN users u ON u.tg_id = p.partner_tg_id
+       WHERE p.tg_id = ?`
+    ).get(tgId) || null
+  );
+}
+
+function linkPair(db, tgId, code) {
+  const c = String(code || '').trim();
+  const inv = db.prepare('SELECT owner_tg_id, expires_at FROM pair_codes WHERE code = ?').get(c);
+  if (!inv) return { error: 'Такого кода нет. Попросите партнёра создать новый: /pair' };
+  if (inv.expires_at <= nowIso()) {
+    db.prepare('DELETE FROM pair_codes WHERE code = ?').run(c);
+    return { error: 'Код истёк. Создайте новый: /pair' };
+  }
+  if (inv.owner_tg_id === tgId) return { error: 'Это ваш собственный код. Отправьте его партнёру.' };
+  if (getPair(db, tgId)) return { error: 'Вы уже в паре. Сначала /unpair' };
+  if (getPair(db, inv.owner_tg_id)) return { error: 'Партнёр уже в другой паре.' };
+  const now = nowIso();
+  db.prepare('INSERT INTO pairs (tg_id, partner_tg_id, created_at) VALUES (?, ?, ?)').run(tgId, inv.owner_tg_id, now);
+  db.prepare('INSERT INTO pairs (tg_id, partner_tg_id, created_at) VALUES (?, ?, ?)').run(inv.owner_tg_id, tgId, now);
+  db.prepare('DELETE FROM pair_codes WHERE code = ?').run(c);
+  return { partnerTgId: inv.owner_tg_id };
+}
+
+function unpair(db, tgId) {
+  const p = getPair(db, tgId);
+  if (!p) return false;
+  db.prepare('DELETE FROM pairs WHERE tg_id = ? OR tg_id = ?').run(tgId, p.tg_id);
+  return true;
+}
+
+function sharedMonth(db, tgId, from, to) {
+  const partner = getPair(db, tgId);
+  if (!partner) return null;
+  const mine = sumBetween(db, tgId, from, to);
+  const theirs = sumBetween(db, partner.tg_id, from, to);
+  const merge = new Map();
+  for (const r of totalsByCategory(db, tgId, from, to)) {
+    merge.set(r.category, { category: r.category, mine: r.total, theirs: 0, total: r.total });
+  }
+  for (const r of totalsByCategory(db, partner.tg_id, from, to)) {
+    const e = merge.get(r.category) || { category: r.category, mine: 0, theirs: 0, total: 0 };
+    e.theirs = r.total;
+    e.total = Math.round((e.mine + e.theirs) * 100) / 100;
+    merge.set(r.category, e);
+  }
+  return {
+    partner,
+    mine,
+    theirs,
+    combined: {
+      total: Math.round((mine.total + theirs.total) * 100) / 100,
+      count: mine.count + theirs.count,
+    },
+    byCat: [...merge.values()].sort((a, b) => b.total - a.total),
+  };
+}
+
 module.exports = {
   openDb,
   ymdInTz,
@@ -228,4 +312,9 @@ module.exports = {
   setLimit,
   deleteLimit,
   getLimit,
+  createPairCode,
+  getPair,
+  linkPair,
+  unpair,
+  sharedMonth,
 };

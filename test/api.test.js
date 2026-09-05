@@ -78,3 +78,55 @@ test('add/edit/stats + isolation', async () => {
     server.close();
   }
 });
+
+test('shared budget for two: code, link, shared stats, unpair', async () => {
+  const { server, base } = await boot();
+  try {
+    const alice = await devLogin(base, 501);
+    const bob = await devLogin(base, 502);
+
+    let st = await alice('/api/pair').then((r) => r.json());
+    assert.equal(st.paired, false);
+
+    const { code } = await alice('/api/pair', {
+      method: 'POST', body: JSON.stringify({ action: 'code' }),
+    }).then((r) => r.json());
+    assert.match(code, /^\d{6}$/);
+
+    // Bob links with Alice's code.
+    const linked = await bob('/api/pair', {
+      method: 'POST', body: JSON.stringify({ action: 'link', code }),
+    }).then((r) => { assert.equal(r.status, 200); return r.json(); });
+    assert.equal(linked.ok, true);
+
+    st = await alice('/api/pair').then((r) => r.json());
+    assert.equal(st.paired, true);
+    assert.equal(st.partner.tg_id, 502);
+
+    // Both spend; shared month merges.
+    await alice('/api/expenses', { method: 'POST', body: JSON.stringify({ text: 'кофе 300' }) });
+    await bob('/api/expenses', { method: 'POST', body: JSON.stringify({ text: 'такси 700' }) });
+    const sh = await alice('/api/stats/shared').then((r) => r.json());
+    assert.equal(sh.paired, true);
+    assert.equal(sh.combined.total, 1000);
+    assert.equal(sh.combined.count, 2);
+    assert.equal(sh.mine.total, 300);
+    assert.equal(sh.theirs.total, 700);
+
+    // Reusing the code fails (single use).
+    const reuse = await bob('/api/pair', {
+      method: 'POST', body: JSON.stringify({ action: 'link', code }),
+    });
+    assert.equal(reuse.status, 400);
+
+    // Unpair from either side.
+    const un = await alice('/api/pair', { method: 'DELETE' }).then((r) => r.json());
+    assert.equal(un.ok, true);
+    st = await bob('/api/pair').then((r) => r.json());
+    assert.equal(st.paired, false);
+    const sh2 = await alice('/api/stats/shared').then((r) => r.json());
+    assert.equal(sh2.paired, false);
+  } finally {
+    server.close();
+  }
+});

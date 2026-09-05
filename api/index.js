@@ -16,7 +16,7 @@ try {
   require('dotenv').config();
 } catch (_) {}
 
-const { openDb } = require('../src/db');
+const { openDb } = require('../src/store');
 const { createServer } = require('../src/server');
 const { createBot, setupBotMenu } = require('../src/bot');
 
@@ -37,7 +37,8 @@ function init() {
   if (app) return Promise.resolve(app);
   if (!initPromise) {
     initPromise = (async () => {
-      const db = openDb();
+      const db = await openDb();
+      console.log(`Store: ${process.env.DATABASE_URL ? 'postgres' : 'sqlite'}`);
       const server = createServer(db);
       const bot = createBot(db);
       server.use(bot.webhookCallback(WEBHOOK_PATH));

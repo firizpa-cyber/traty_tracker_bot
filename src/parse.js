@@ -162,8 +162,7 @@ function parseExpense(text, opts = {}) {
 /**
  * Split "кофе 350 и такси 900" / "кофе 350, такси 900" into parts.
  * Returns null when it's a single expense ("2 кофе 350" has no separator).
- */
-function splitExpenseParts(text) {
+ */function splitExpenseParts(text) {
   const parts = String(text || '')
     .split(/\s*(?:[;,]|[+×]|\n)\s*|\s+(?:и|а|плюс|еще|ещё)\s+/i)
     .map((s) => s.trim())
@@ -171,6 +170,45 @@ function splitExpenseParts(text) {
   if (parts.length < 2 || parts.length > 5) return null;
   if (!parts.every((p) => /\d/.test(p))) return null;
   return parts;
+}
+
+// Receipt OCR: find the payable total in noisy recognized text.
+// Prefers lines marked итого/total/к оплате, otherwise the largest amount.
+const TOTAL_HINTS = [/итог/i, /total/i, /к оплате/i, /коплате/i, /сумм/i, /оплат/i, /sale/i];
+
+function parseReceiptTotal(text, opts = {}) {
+  const { defaultCurrency, baseCurrency, rates } = normOpts(opts);
+  const lines = String(text || '').split(/[\n;]+/).map((s) => s.trim()).filter(Boolean);
+  const cands = [];
+  for (const line of lines) {
+    // Skip change/credit lines that look like big numbers but aren't the total.
+    if (/сдач|return|остаток/i.test(line)) continue;
+    for (const n of findNumbers(line)) {
+      const amount = parseNumberSafe(n.raw);
+      if (!Number.isFinite(amount) || amount <= 0 || amount > 1e9) continue;
+      cands.push({
+        amount,
+        currency: detectCurrencyAround(line, n.start, n.end),
+        hinted: TOTAL_HINTS.some((re) => re.test(line)),
+      });
+    }
+  }
+  if (cands.length === 0) return { ok: false, error: 'Не нашёл сумму в чеке' };
+  cands.sort((a, b) => Number(b.hinted) - Number(a.hinted) || b.amount - a.amount);
+  const best = cands[0];
+  const currency = (best.currency || defaultCurrency).toUpperCase();
+  const rate = Number(rates[currency] ?? (currency === baseCurrency ? 1 : NaN));
+  if (!Number.isFinite(rate)) return { ok: false, error: `Не знаю курс ${currency}` };
+  const description = 'Чек';
+  return {
+    ok: true,
+    amount: best.amount,
+    currency,
+    amountBase: Math.round(best.amount * rate * 100) / 100,
+    baseCurrency,
+    description,
+    category: detectCategory(String(text || '')),
+  };
 }
 
 function formatMoney(amount, currency) {
@@ -181,4 +219,4 @@ function formatMoney(amount, currency) {
   return `${str} ${currency}`;
 }
 
-module.exports = { parseExpense, extractAmount, splitExpenseParts, cleanDescription, formatMoney };
+module.exports = { parseExpense, extractAmount, splitExpenseParts, cleanDescription, parseReceiptTotal, formatMoney };

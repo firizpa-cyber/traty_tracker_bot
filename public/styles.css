@@ -133,7 +133,7 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .lim.over { color: var(--danger); font-weight: 700; }
 
 /* ---------- history ---------- */
-.exp { display: flex; justify-content: space-between; gap: 10px; padding: 12px 0; border-top: 1px solid rgba(127,140,160,.18); }
+.exp { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 12px 0; border-top: 1px solid rgba(127,140,160,.18); }
 .exp:first-child { border-top: 0; }
 .exp .d { font-weight: 700; }
 .exp .m { font-size: 12px; color: var(--muted); margin-top: 2px; }
@@ -157,6 +157,36 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .logo { font-size: 64px; }
 .login-wrap h1 { margin: 0; font-size: 30px; }
 .feat { display: grid; gap: 8px; text-align: left; background: var(--card); border-radius: var(--radius); padding: 16px; margin: 8px 0; font-size: 14px; }
+
+/* ---------- views & tabbar ---------- */
+.view { display: grid; gap: 14px; }
+.wrap { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+.tma .wrap { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(127,140,160,.25);
+}
+.tab {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  background: none; border: 0; color: var(--muted); font-size: 11px; font-weight: 600;
+  padding: 6px 0; border-radius: 12px; cursor: pointer;
+}
+.tab-ico { font-size: 21px; }
+.tab.active { color: var(--accent); }
+
+/* ---------- history grouping ---------- */
+.day-head {
+  display: flex; justify-content: space-between; gap: 8px;
+  font-weight: 800; font-size: 14px; margin-top: 12px; padding: 8px 0 2px;
+  border-top: 1px solid rgba(127,140,160,.18);
+}
+.day-head:first-child { border-top: 0; margin-top: 0; }
+.day-total { color: var(--accent); white-space: nowrap; }
+.cat-ico.sm { width: 34px; height: 34px; font-size: 17px; border-radius: 12px; }
 
 /* ---------- Telegram Mini App ---------- */
 .tma .screen { min-height: var(--tma-vh, 100dvh); }

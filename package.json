@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node --test test/parse.test.js test/api.test.js test/auth.test.js test/frontend.test.js"
+    "test": "node --test test/parse.test.js test/api.test.js test/auth.test.js test/frontend.test.js test/pg.test.js"
   },
   "engines": {
     "node": ">=22"
@@ -16,10 +16,15 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
+    "googleapis": "^178.0.0",
     "jsonwebtoken": "^9.0.2",
+    "pg": "^8.23.0",
     "telegraf": "^4.16.3"
   },
   "optionalDependencies": {
     "tesseract.js": "^5.1.1"
+  },
+  "devDependencies": {
+    "pg-mem": "^3.0.14"
   }
 }

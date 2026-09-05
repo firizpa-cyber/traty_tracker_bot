@@ -2,12 +2,13 @@
 
 require('dotenv').config();
 
-const { openDb } = require('./db');
+const { openDb } = require('./store');
 const { createServer } = require('./server');
 const { createBot, setupBotMenu } = require('./bot');
 
 async function main() {
-  const db = openDb();
+  const db = await openDb();
+  console.log(`Store: ${process.env.DATABASE_URL ? 'postgres' : 'sqlite'}`);
   const app = createServer(db);
   const port = Number(process.env.PORT || 3000);
   const server = app.listen(port, () => {

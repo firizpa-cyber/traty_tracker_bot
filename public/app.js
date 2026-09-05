@@ -9,6 +9,9 @@ const state = {
   limits: [],
   offset: 0,
   q: '',
+  fcat: 'all',
+  tab: localStorage.getItem('et_tab') || 'home',
+  sheetsEnabled: false,
   editingId: null,
 };
 
@@ -92,7 +95,9 @@ async function boot() {
     const cfg = await fetch('/api/config').then((r) => r.json());
     state.baseCurrency = cfg.baseCurrency;
     state.categories = cfg.categories;
+    state.sheetsEnabled = !!cfg.sheetsEnabled;
     $('me-label').textContent = me.profile.first_name || `@${me.profile.username || ''}` || 'Telegram';
+    $('me-full').textContent = `Вы вошли как ${me.profile.first_name || 'пользователь Telegram'}${me.profile.username ? ` (@${me.profile.username})` : ''}. Отдельного пароля нет — вход через бота.`;
     showApp();
   } catch (_) {
     showLogin();
@@ -158,7 +163,39 @@ function showApp() {
   $('login').classList.add('hidden');
   $('app').classList.remove('hidden');
   bind();
+  // Category filter options.
+  $('fcat').innerHTML = `<option value="all">Все категории</option>` +
+    state.categories.map((c) => `<option value="${c.id}">${c.emoji} ${c.label}</option>`).join('');
+  $('fcat').value = state.fcat;
+  // Sheets export button only when the server is configured.
+  $('btn-sheets').classList.toggle('hidden', !state.sheetsEnabled);
+  fetch('/healthz').then((r) => r.json()).then((h) => {
+    $('store-label').textContent = h.store === 'postgres'
+      ? 'Хранилище: облачная база — данные сохраняются навсегда.'
+      : 'Хранилище: локальный файл (подключите DATABASE_URL для вечного хранения).';
+  }).catch(() => {});
+  switchTab(state.tab, true);
+  loadPair();
   refresh();
+}
+
+function switchTab(name, first) {
+  state.tab = name;
+  localStorage.setItem('et_tab', name);
+  for (const v of ['home', 'stats', 'history', 'more']) {
+    $('view-' + v).classList.toggle('hidden', v !== name);
+  }
+  document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+  if (!first) {
+    haptic('light');
+    window.scrollTo({ top: 0 });
+  }
+}
+
+function dayTitle(ymd) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const s = new Date(y, m - 1, d).toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function bind() {
@@ -199,6 +236,20 @@ function bind() {
     t = setTimeout(() => { state.q = e.target.value.trim(); state.offset = 0; loadList(true); }, 300);
   };
   $('btn-more').onclick = () => { state.offset += 30; loadList(false); };
+  document.querySelectorAll('.tab').forEach((b) => (b.onclick = () => switchTab(b.dataset.tab)));
+  $('fcat').onchange = (e) => { state.fcat = e.target.value; state.offset = 0; loadList(true); };
+  $('btn-sheets').onclick = async () => {
+    const { from, to } = monthBounds(state.month);
+    $('sheets-msg').textContent = 'Записываю в таблицу…';
+    try {
+      const r = await api('/api/export/sheets', { method: 'POST', body: JSON.stringify({ from, to }) });
+      $('sheets-msg').innerHTML = `Готово: ${r.count} строк. <a href="${r.url}" target="_blank" rel="noopener">Открыть таблицу</a>`;
+      haptic('success');
+    } catch (err) {
+      $('sheets-msg').textContent = 'Не получилось: ' + err.message;
+      haptic('error');
+    }
+  };
   $('btn-limits').onclick = () => {
     $('limits-form').classList.toggle('hidden');
     renderLimitsEditor();
@@ -314,23 +365,51 @@ async function loadList(reset) {
   const { from, to } = monthBounds(state.month);
   const p = new URLSearchParams({ from, to, limit: 30, offset: state.offset });
   if (state.q) p.set('q', state.q);
+  if (state.fcat && state.fcat !== 'all') p.set('category', state.fcat);
   const d = await api('/api/expenses?' + p.toString());
   if (reset) $('list').innerHTML = '';
-  if (reset && d.items.length === 0) $('list').innerHTML = '<div class="muted">Нет трат за этот период.</div>';
+  if (reset && d.items.length === 0) {
+    $('list').innerHTML = '<div class="empty">Ничего не найдено. Попробуйте другой месяц или уберите фильтр.</div>';
+  }
+  // Group by day, newest first, with a per-day total.
+  let lastDay = reset ? null : $('list').dataset.lastDay || null;
   for (const e of d.items) {
+    if (e.day !== lastDay) {
+      lastDay = e.day;
+      const h = document.createElement('div');
+      h.className = 'day-head';
+      h.dataset.day = e.day;
+      h.innerHTML = `<span>${dayTitle(e.day)}</span><span class="day-total" data-daytotal="${e.day}"></span>`;
+      $('list').appendChild(h);
+    }
     const div = document.createElement('div');
     div.className = 'exp';
+    div.dataset.day = e.day;
+    div.dataset.base = e.amountBase;
     div.innerHTML =
-      `<div><div class="d">${escapeHtml(e.description)}</div>` +
-      `<div class="m">${catEmoji(e.category)} ${escapeHtml(e.categoryLabel)} · ${e.day} · #${e.id}</div>` +
+      `<div class="cat-ico sm" style="background:${catColor(e.category)}">${catEmoji(e.category)}</div>` +
+      `<div style="flex:1;min-width:0"><div class="d">${escapeHtml(e.description)}</div>` +
+      `<div class="m">${escapeHtml(e.categoryLabel)} · #${e.id}</div>` +
       `<div class="acts"><button class="link" data-edit="${e.id}">Изменить</button>` +
       `<button class="link del" data-del="${e.id}">Удалить</button></div></div>` +
       `<div class="amt">${fmt(e.amount, e.currency)}</div>`;
     $('list').appendChild(div);
   }
+  $('list').dataset.lastDay = lastDay || '';
+  updateDayTotals();
   $('btn-more').classList.toggle('hidden', !(state.offset + 30 < d.total));
   $('list').querySelectorAll('[data-del]').forEach((b) => (b.onclick = () => delExpense(Number(b.dataset.del))));
   $('list').querySelectorAll('[data-edit]').forEach((b) => (b.onclick = () => openModal(Number(b.dataset.edit))));
+}
+
+function updateDayTotals() {
+  const sums = {};
+  $('list').querySelectorAll('.exp').forEach((el) => {
+    sums[el.dataset.day] = (sums[el.dataset.day] || 0) + Number(el.dataset.base || 0);
+  });
+  $('list').querySelectorAll('[data-daytotal]').forEach((el) => {
+    el.textContent = fmt(Math.round(sums[el.dataset.day] * 100) / 100, state.baseCurrency);
+  });
 }
 
 function catEmoji(id) {
@@ -389,6 +468,7 @@ async function saveModal() {
 function renderLimitsEditor() {
   const box = $('limits-rows');
   box.innerHTML = '';
+  $('limits-cap').textContent = `Лимит на месяц в ${state.baseCurrency}. Бот предупредит, когда потратите 80% и при превышении.`;
   const limMap = Object.fromEntries(state.limits.map((l) => [l.category, l.amount_base]));
   for (const c of state.categories) {
     if (c.id === 'other') continue;
@@ -416,6 +496,54 @@ async function saveLimits() {
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function loadPair() {
+  const box = $('pair-box');
+  try {
+    const st = await api('/api/pair');
+    if (st.paired) {
+      const sh = await api('/api/stats/shared?month=' + state.month).catch(() => null);
+      const nm = st.partner.first_name || (st.partner.username ? '@' + st.partner.username : 'партнёр');
+      box.innerHTML =
+        `<div>В паре с <b>${escapeHtml(nm)}</b></div>` +
+        (sh && sh.paired
+          ? `<div class="t-val" style="margin:6px 0">${fmt(sh.combined.total, sh.baseCurrency)}</div>` +
+            `<div class="muted small">на двоих за ${monthLabel(state.month).toLowerCase()} · ` +
+            `вы ${fmt(sh.mine.total, sh.baseCurrency)} · партнёр ${fmt(sh.theirs.total, sh.baseCurrency)}</div>`
+          : '') +
+        `<div class="row"><button id="btn-unpair" class="btn small secondary">Расформировать</button></div>`;
+      $('btn-unpair').onclick = async () => {
+        await api('/api/pair', { method: 'DELETE' });
+        loadPair();
+      };
+    } else {
+      box.innerHTML =
+        `<div class="muted small">Пока только ваши траты. Создайте код и отправьте партнёру — он введёт его в боте (/pair КОД) или здесь.</div>` +
+        `<div class="row"><button id="btn-pair-code" class="btn small">Создать код</button></div>` +
+        `<div id="pair-code-out"></div>` +
+        `<div class="row"><input id="pair-code-in" inputmode="numeric" placeholder="Код партнёра" style="max-width:160px" />` +
+        `<button id="btn-pair-link" class="btn small secondary">Привязать</button></div>` +
+        `<div id="pair-err" class="err"></div>`;
+      $('btn-pair-code').onclick = async () => {
+        const r = await api('/api/pair', { method: 'POST', body: JSON.stringify({ action: 'code' }) });
+        $('pair-code-out').innerHTML = `Ваш код: <b style="font-size:22px">${r.code}</b> <span class="muted small">(15 минут)</span>`;
+        haptic('success');
+      };
+      $('btn-pair-link').onclick = async () => {
+        try {
+          await api('/api/pair', { method: 'POST', body: JSON.stringify({ action: 'link', code: $('pair-code-in').value }) });
+          haptic('success');
+          loadPair();
+        } catch (e) {
+          $('pair-err').textContent = e.message;
+          haptic('error');
+        }
+      };
+    }
+  } catch (e) {
+    box.innerHTML = '<div class="err">Не получилось загрузить: ' + escapeHtml(e.message) + '</div>';
+  }
 }
 
 /* ---------- Telegram Mini App ---------- */

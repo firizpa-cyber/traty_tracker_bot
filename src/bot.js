@@ -3,13 +3,14 @@
 // Bot = fast input + launcher for the Mini App.
 // All screens moved into the Telegram Mini App (public/); here stays:
 // one-message expense input, smart questions, edit/delete/undo buttons,
-// totals by command, limits, CSV export.
+// totals by command, limits, CSV/Sheets export.
 
 const { Telegraf, Markup } = require('telegraf');
-const { parseExpense, splitExpenseParts, formatMoney } = require('./parse');
+const { parseExpense, splitExpenseParts, parseReceiptTotal, formatMoney } = require('./parse');
 const { getCategory, detectCategory, norm } = require('./categories');
-const dbm = require('./db');
+const dbm = require('./store');
 const { signToken } = require('./auth');
+const sheets = require('./sheets');
 
 function cfg() {
   const baseCurrency = (process.env.BASE_CURRENCY || process.env.DEFAULT_CURRENCY || 'TJS').toUpperCase();
@@ -36,6 +37,9 @@ const COMMANDS = [
   { command: 'limit', description: 'Лимит: /limit кафе 5000' },
   { command: 'limits', description: 'Показать лимиты' },
   { command: 'export', description: 'Выгрузить CSV' },
+  { command: 'sheets', description: 'Выписка в Google Sheets' },
+  { command: 'pair', description: 'Общий бюджет: /pair или /pair КОД' },
+  { command: 'shared', description: 'Общий итог на двоих' },
 ];
 
 async function setupBotMenu(bot) {
@@ -94,7 +98,8 @@ function helpText() {
     '/today · /week · /month — итоги',
     '/list — последние · /undo — отменить последнюю',
     '/edit <id> <текст> · /del <id>',
-    '/limit <категория> <сумма> · /limits · /export',
+    '/limit <категория> <сумма> · /limits · /export · /sheets',
+    '/pair — общий бюджет на двоих · /shared — итог на двоих',
   ].join('\n');
 }
 
@@ -113,13 +118,13 @@ function periodRange(kind) {
 async function reportSummary(ctx, db, kind) {
   const { from, to, title } = periodRange(kind);
   const tgId = ctx.from.id;
-  const { total, count } = dbm.sumBetween(db, tgId, from, to);
-  const byCat = dbm.totalsByCategory(db, tgId, from, to);
+  const { total, count } = await dbm.sumBetween(db, tgId, from, to);
+  const byCat = await dbm.totalsByCategory(db, tgId, from, to);
   const { baseCurrency } = cfg();
   let msg = `*${title}: ${formatMoney(total, baseCurrency)}* (${count} трат)\n`;
   for (const r of byCat.slice(0, 8)) {
     const c = getCategory(r.category);
-    msg += `\n${c.emoji} ${c.label} — ${formatMoney(r.total, baseCurrency)}`;
+    msg += `\n${c.emoji} ${c.label} — ${formatMoney(Number(r.total), baseCurrency)}`;
   }
   if (byCat.length === 0) msg += '\nПока пусто. Напишите, например: кофе 350';
   try {
@@ -149,7 +154,7 @@ function createBot(db) {
   };
 
   bot.start(async (ctx) => {
-    dbm.upsertUser(db, { tg_id: ctx.from.id, first_name: ctx.from.first_name, username: ctx.from.username });
+    await dbm.upsertUser(db, { tg_id: ctx.from.id, first_name: ctx.from.first_name, username: ctx.from.username });
     pendingEdit.delete(ctx.from.id);
     await ctx.replyWithHTML(welcomeText(ctx.from.first_name), appKeyboard());
     return ctx.reply('Графики, история и лимиты — здесь:', openAppInline(ctx));
@@ -170,8 +175,54 @@ function createBot(db) {
   bot.command('list', (ctx) => listCmd(ctx, db));
   bot.command('limits', (ctx) => limitsCmd(ctx, db));
 
+  bot.command('pair', async (ctx) => {
+    await dbm.upsertUser(db, { tg_id: ctx.from.id, first_name: ctx.from.first_name, username: ctx.from.username });
+    const arg = ctx.message.text.trim().split(/\s+/)[1];
+    if (!arg) {
+      const paired = await dbm.getPair(db, ctx.from.id);
+      if (paired) {
+        return ctx.reply(`Вы уже в паре с ${pairName(paired)}. Общий итог: /shared · Расформировать: /unpair`);
+      }
+      const { code } = await dbm.createPairCode(db, ctx.from.id);
+      return ctx.replyWithMarkdown(
+        `Ваш код для партнёра: *${code}*\nДействует 15 минут. Партнёр вводит:\n/pair ${code}`
+      );
+    }
+    const r = await dbm.linkPair(db, ctx.from.id, arg);
+    if (r.error) return ctx.reply(r.error);
+    const partner = await dbm.getPair(db, ctx.from.id);
+    try {
+      await ctx.telegram.sendMessage(
+        r.partnerTgId,
+        `👥 ${ctx.from.first_name || 'Пользователь'} объединился с вами в общий бюджет. Итог: /shared`
+      );
+    } catch (_) {}
+    return ctx.reply(`👥 Готово! Общий бюджет с ${pairName(partner)}. Смотрите итог: /shared`);
+  });
+
+  bot.command('unpair', async (ctx) => {
+    const ok = await dbm.unpair(db, ctx.from.id);
+    return ctx.reply(ok ? 'Пара расформирована. Все ваши траты остались у вас.' : 'Вы не в паре.');
+  });
+
+  bot.command('shared', async (ctx) => {
+    const { baseCurrency } = cfg();
+    const today = dbm.ymdInTz();
+    const { from, to } = dbm.monthRangeSafe(today.slice(0, 7));
+    const s = await dbm.sharedMonth(db, ctx.from.id, from, to);
+    if (!s) return ctx.reply('Вы не в паре. Создайте код: /pair — партнёр введёт /pair КОД.');
+    let msg = `*👥 На двоих в этом месяце: ${formatMoney(s.combined.total, baseCurrency)}* (${s.combined.count} трат)\n`;
+    msg += `\nВы: ${formatMoney(s.mine.total, baseCurrency)} (${s.mine.count})`;
+    msg += `\n${pairName(s.partner)}: ${formatMoney(s.theirs.total, baseCurrency)} (${s.theirs.count})`;
+    for (const c of s.byCat.slice(0, 6)) {
+      const cat = getCategory(c.category);
+      msg += `\n${cat.emoji} ${cat.label} — ${formatMoney(c.total, baseCurrency)}`;
+    }
+    return ctx.replyWithMarkdown(msg);
+  });
+
   bot.command('export', async (ctx) => {
-    const { rows } = dbm.listExpenses(db, ctx.from.id, { limit: 200 });
+    const { rows } = await dbm.listExpenses(db, ctx.from.id, { limit: 200 });
     if (rows.length === 0) return ctx.reply('Пока нечего выгружать.');
     const lines = ['id,date,description,category,amount,currency,amount_base,base_currency'];
     const esc = (s) => `"${String(s).replace(/"/g, '""')}"`;
@@ -182,26 +233,42 @@ function createBot(db) {
     await ctx.replyWithDocument({ source: buf, filename: 'expenses.csv' });
   });
 
-  bot.command('limit', (ctx) => {
+  bot.command('sheets', async (ctx) => {
+    if (!sheets.isConfigured()) {
+      return ctx.reply('Выписка в Google Sheets не настроена на сервере. Инструкция — в README (GOOGLE_SHEET_ID). А пока работает /export в CSV.');
+    }
+    await ctx.reply('Готовлю выписку…');
+    try {
+      const { rows } = await dbm.listExpenses(db, ctx.from.id, { limit: 5000 });
+      if (rows.length === 0) return ctx.reply('Пока нечего выгружать.');
+      const r = await sheets.appendExpenses(rows);
+      return ctx.reply(`✅ Выписка готова: ${r.count} строк.\n${r.url}`);
+    } catch (e) {
+      console.error('sheets failed:', e.message);
+      return ctx.reply('Не получилось записать в таблицу. Проверьте доступ сервисного аккаунта к таблице.');
+    }
+  });
+
+  bot.command('limit', async (ctx) => {
     const { error, category, amount } = parseLimitArgs(ctx.message.text);
     if (error) return ctx.reply(`${error}\nУдобнее — в приложении: 📱 Открыть расходы → Лимиты.`);
     const { baseCurrency } = cfg();
-    dbm.setLimit(db, ctx.from.id, category, amount);
+    await dbm.setLimit(db, ctx.from.id, category, amount);
     const c = getCategory(category);
     return ctx.reply(`${c.emoji} Лимит «${c.label}»: ${formatMoney(amount, baseCurrency)} на месяц. Предупрежу на 80% и при превышении.`);
   });
 
-  bot.command('rmlimit', (ctx) => {
+  bot.command('rmlimit', async (ctx) => {
     const words = ctx.message.text.trim().split(/\s+/).slice(1).join(' ');
     if (!words) return ctx.reply('Пример: /rmlimit кафе');
-    dbm.deleteLimit(db, ctx.from.id, detectCategory(words));
+    await dbm.deleteLimit(db, ctx.from.id, detectCategory(words));
     return ctx.reply('Лимит убран.');
   });
 
-  bot.command('del', (ctx) => {
+  bot.command('del', async (ctx) => {
     const id = Number(ctx.message.text.trim().split(/\s+/)[1]);
     if (!Number.isInteger(id)) return ctx.reply('Пример: /del 12');
-    const ok = dbm.deleteExpense(db, ctx.from.id, id);
+    const ok = await dbm.deleteExpense(db, ctx.from.id, id);
     return ctx.reply(ok ? `Трата #${id} удалена.` : `Не нашёл трату #${id}.`);
   });
 
@@ -209,11 +276,11 @@ function createBot(db) {
     const m = ctx.message.text.match(/^\/edit\s+(\d+)\s+([\s\S]+)/);
     if (!m) return ctx.reply('Пример: /edit 12 кофе 400');
     const id = Number(m[1]);
-    const cur = dbm.getExpense(db, ctx.from.id, id);
+    const cur = await dbm.getExpense(db, ctx.from.id, id);
     if (!cur) return ctx.reply(`Не нашёл трату #${id}.`);
     const p = parseExpense(m[2], popts());
     if (!p.ok) return ctx.reply(p.error);
-    const next = dbm.updateExpense(db, ctx.from.id, id, {
+    const next = await dbm.updateExpense(db, ctx.from.id, id, {
       amount: p.amount, currency: p.currency, amount_base: p.amountBase,
       base_currency: p.baseCurrency, description: p.description, category: p.category,
     });
@@ -234,7 +301,7 @@ function createBot(db) {
     ]));
   });
   bot.action(/del_yes:(\d+)/, async (ctx) => {
-    dbm.deleteExpense(db, ctx.from.id, Number(ctx.match[1]));
+    await dbm.deleteExpense(db, ctx.from.id, Number(ctx.match[1]));
     await ctx.answerCbQuery('Удалено');
     return ctx.editMessageText(`Трата #${ctx.match[1]} удалена.`);
   });
@@ -243,7 +310,7 @@ function createBot(db) {
     return ctx.editMessageText('Ок, оставил.');
   });
   bot.action(/undo:(\d+)/, async (ctx) => {
-    const ok = dbm.deleteExpense(db, ctx.from.id, Number(ctx.match[1]));
+    const ok = await dbm.deleteExpense(db, ctx.from.id, Number(ctx.match[1]));
     await ctx.answerCbQuery(ok ? 'Отменено' : 'Уже удалено');
     try {
       await ctx.editMessageText(ok ? `↩️ Запись #${ctx.match[1]} отменена.` : 'Запись уже удалена.');
@@ -253,11 +320,11 @@ function createBot(db) {
   // Receipt photos: parse caption; optional OCR.
   bot.on('photo', async (ctx) => {
     const caption = ctx.message.caption || '';
-    dbm.upsertUser(db, { tg_id: ctx.from.id, first_name: ctx.from.first_name, username: ctx.from.username });
+    await dbm.upsertUser(db, { tg_id: ctx.from.id, first_name: ctx.from.first_name, username: ctx.from.username });
     if (caption) {
       const p = parseExpense(caption, popts());
       if (p.ok) {
-        const saved = saveExpense(ctx, db, p);
+        const saved = await saveExpense(ctx, db, p);
         lastSaved.set(ctx.from.id, saved.id);
         return ctx.reply(`🧾 ${expenseLine(saved)}`, undoKeyboard(saved.id));
       }
@@ -266,12 +333,13 @@ function createBot(db) {
       try {
         const text = await ocrPhoto(ctx);
         if (text) {
-          const p = parseExpense(text, popts());
+          const p = parseReceiptTotal(text, popts());
           if (p.ok) {
-            const saved = saveExpense(ctx, db, p);
+            const saved = await saveExpense(ctx, db, p);
             lastSaved.set(ctx.from.id, saved.id);
             return ctx.reply(`Чек распознан: ${expenseLine(saved)}\nЕсли сумма неверная — исправьте: /edit ${saved.id} <текст>`, editKeyboard(saved.id));
           }
+          return ctx.reply('Не смог разобрать сумму в чеке. Пришлите фото с подписью, например «обед 450».');
         }
       } catch (e) {
         console.error('OCR failed', e.message);
@@ -284,7 +352,7 @@ function createBot(db) {
   bot.on('text', async (ctx) => {
     const text = ctx.message.text || '';
     if (text.startsWith('/')) return; // commands handled above
-    dbm.upsertUser(db, { tg_id: ctx.from.id, first_name: ctx.from.first_name, username: ctx.from.username });
+    await dbm.upsertUser(db, { tg_id: ctx.from.id, first_name: ctx.from.first_name, username: ctx.from.username });
     const tgId = ctx.from.id;
 
     const pend = pendingEdit.get(tgId);
@@ -292,7 +360,7 @@ function createBot(db) {
       pendingEdit.delete(tgId);
       const p = parseExpense(text, popts());
       if (!p.ok) return ctx.reply(p.error + '\nПравка отменена. Попробуйте ещё раз через кнопку «Изменить».');
-      const next = dbm.updateExpense(db, tgId, pend, {
+      const next = await dbm.updateExpense(db, tgId, pend, {
         amount: p.amount, currency: p.currency, amount_base: p.amountBase,
         base_currency: p.baseCurrency, description: p.description, category: p.category,
       });
@@ -308,10 +376,11 @@ function createBot(db) {
     if (parts) {
       const parsed = parts.map((part) => parseExpense(part, popts()));
       if (parsed.every((p) => p.ok)) {
-        const saved = parsed.map((p) => saveExpense(ctx, db, p));
+        const saved = [];
+        for (const p of parsed) saved.push(await saveExpense(ctx, db, p));
         lastSaved.set(tgId, saved[saved.length - 1].id);
         const lines = saved.map(expenseLine).join('\n');
-        const { total } = dbm.sumBetween(db, tgId, dbm.ymdInTz(), dbm.ymdInTz());
+        const { total } = await dbm.sumBetween(db, tgId, dbm.ymdInTz(), dbm.ymdInTz());
         return ctx.reply(`✅ Записал сразу ${saved.length}:\n${lines}\nСегодня: ${formatMoney(total, saved[0].base_currency)}`, undoKeyboard(saved[saved.length - 1].id));
       }
       // else fall through to single-message parse (better error message)
@@ -319,10 +388,10 @@ function createBot(db) {
 
     const p = parseExpense(text, popts());
     if (!p.ok) return ctx.reply(p.error + '\nГрафики и история — в приложении: /app');
-    const saved = saveExpense(ctx, db, p);
+    const saved = await saveExpense(ctx, db, p);
     lastSaved.set(tgId, saved.id);
-    const warn = limitWarning(db, tgId, saved);
-    const { total } = dbm.sumBetween(db, tgId, dbm.ymdInTz(), dbm.ymdInTz());
+    const warn = await limitWarning(db, tgId, saved);
+    const { total } = await dbm.sumBetween(db, tgId, dbm.ymdInTz(), dbm.ymdInTz());
     let msg = `✅ ${expenseLine(saved)}\nСегодня: ${formatMoney(total, saved.base_currency)}`;
     if (warn) msg += `\n\n${warn}`;
     return ctx.reply(msg, undoKeyboard(saved.id));
@@ -379,18 +448,18 @@ function saveExpense(ctx, db, p) {
   });
 }
 
-function limitWarning(db, tgId, saved) {
+async function limitWarning(db, tgId, saved) {
   // Warn when monthly total in this category (or overall) exceeds the limit.
   const month = saved.day.slice(0, 7);
   const { from, to } = dbm.monthRangeSafe(month);
-  const check = (category) => {
-    const lim = dbm.getLimit(db, tgId, category);
+  const check = async (category) => {
+    const lim = await dbm.getLimit(db, tgId, category);
     if (!lim) return null;
     let spent;
     if (category === '*') {
-      spent = dbm.sumBetween(db, tgId, from, to).total;
+      spent = (await dbm.sumBetween(db, tgId, from, to)).total;
     } else {
-      const rows = dbm.totalsByCategory(db, tgId, from, to);
+      const rows = await dbm.totalsByCategory(db, tgId, from, to);
       spent = (rows.find((r) => r.category === category) || { total: 0 }).total;
     }
     if (spent > lim) {
@@ -403,11 +472,11 @@ function limitWarning(db, tgId, saved) {
     }
     return null;
   };
-  return check(saved.category) || check('*');
+  return (await check(saved.category)) || (await check('*'));
 }
 
 async function listCmd(ctx, db) {
-  const { rows } = dbm.listExpenses(db, ctx.from.id, { limit: 10 });
+  const { rows } = await dbm.listExpenses(db, ctx.from.id, { limit: 10 });
   if (rows.length === 0) return ctx.reply('Пока пусто. Напишите, например: кофе 350');
   const lines = rows.map(expenseLine);
   return ctx.reply('Последние:\n' + lines.join('\n') + '\n\nИсправить: /edit <id> <текст> · Удалить: /del <id>');
@@ -415,7 +484,7 @@ async function listCmd(ctx, db) {
 
 async function limitsCmd(ctx, db) {
   const { baseCurrency } = cfg();
-  const lims = dbm.getLimits(db, ctx.from.id);
+  const lims = await dbm.getLimits(db, ctx.from.id);
   let msg = '⚙️ Лимиты на месяц:\n';
   if (lims.length === 0) {
     msg += 'пока нет. Удобнее ставить в приложении: /app → Лимиты.';
@@ -428,10 +497,15 @@ async function limitsCmd(ctx, db) {
   return ctx.reply(msg);
 }
 
+function pairName(p) {
+  if (!p) return 'партнёр';
+  return p.first_name || (p.username ? `@${p.username}` : `id ${p.tg_id}`);
+}
+
 async function undoLast(ctx, db, lastSaved) {
   const id = lastSaved.get(ctx.from.id);
   if (!id) return ctx.reply('Нечего отменять — последней записи нет.');
-  const ok = dbm.deleteExpense(db, ctx.from.id, id);
+  const ok = await dbm.deleteExpense(db, ctx.from.id, id);
   lastSaved.delete(ctx.from.id);
   return ctx.reply(ok ? `↩️ Отменил: трата #${id} удалена.` : 'Эта запись уже удалена.');
 }
