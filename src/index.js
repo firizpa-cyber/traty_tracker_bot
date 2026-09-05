@@ -4,7 +4,7 @@ require('dotenv').config();
 
 const { openDb } = require('./db');
 const { createServer } = require('./server');
-const { createBot } = require('./bot');
+const { createBot, setupBotMenu } = require('./bot');
 
 async function main() {
   const db = openDb();
@@ -36,6 +36,7 @@ async function main() {
   } else {
     await bot.launch(() => console.log('Bot polling started'));
   }
+  await setupBotMenu(bot); // command hints in the Telegram input field
 }
 
 main().catch((e) => {

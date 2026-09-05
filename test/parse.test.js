@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { parseExpense } = require('../src/parse');
+const { parseExpense, extractAmount, splitExpenseParts, cleanDescription } = require('../src/parse');
 
 const OPTS = { defaultCurrency: 'TJS', baseCurrency: 'TJS', rates: { TJS: 1, USD: 10.9, EUR: 11.8, RUB: 0.12 } };
 
@@ -57,4 +57,32 @@ test('unknown currency word stays description', () => {
   const p = parseExpense('кофе 350 работа', OPTS);
   assert.equal(p.ok, true);
   assert.equal(p.category, 'work');
+});
+
+test('потратил 500 на такси: filler words cleaned', () => {
+  const p = parseExpense('потратил 500 на такси', OPTS);
+  assert.equal(p.ok, true);
+  assert.equal(p.amount, 500);
+  assert.equal(p.category, 'transport');
+  assert.match(p.description, /Такси/);
+  assert.doesNotMatch(p.description, /потратил/i);
+});
+
+test('extractAmount for dialog step', () => {
+  const a = extractAmount('около 1200', OPTS);
+  assert.equal(a.ok, true);
+  assert.equal(a.amount, 1200);
+  assert.equal(extractAmount('без цифр', OPTS).ok, false);
+});
+
+test('splitExpenseParts: two at once', () => {
+  assert.deepEqual(splitExpenseParts('кофе 350 и такси 900'), ['кофе 350', 'такси 900']);
+  assert.deepEqual(splitExpenseParts('кофе 350, такси 900'), ['кофе 350', 'такси 900']);
+  assert.equal(splitExpenseParts('2 кофе 350'), null);
+  assert.equal(splitExpenseParts('кофе 350'), null);
+});
+
+test('cleanDescription strips fillers and prepositions', () => {
+  assert.equal(cleanDescription('потратил на такси'), 'такси');
+  assert.equal(cleanDescription('заплатил за обед'), 'обед');
 });

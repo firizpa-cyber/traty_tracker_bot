@@ -18,6 +18,28 @@ const CURRENCY_WORDS = [
   [/₽/, 'RUB'],
 ];
 
+// Filler words people naturally type: "потратил 500 на такси".
+// Stripped from the start of the description so cards look clean.
+const FILLERS = [
+  'потратил', 'потратила', 'потрачено', 'заплатил', 'заплатила', 'оплатил', 'оплатила',
+  'отдал', 'отдала', 'купил', 'купила', 'взял', 'взяла', 'вышло', 'вышла',
+  'стоило', 'стоил', 'стоила', 'стоит', 'цена', 'сумма', 'всего', 'итого', 'чек', 'покупка',
+];
+// NB: \b doesn't see Cyrillic as word chars, so boundaries use explicit lookahead.
+const WORD_END = '(?=[\\s,.!?;:\\-—()"]|$)';
+const FILLER_RE = new RegExp(`^(?:${FILLERS.join('|')})${WORD_END}`, 'i');
+const LEAD_PREP = /^(на|за|в|во|по|для|от|с|со|к)(?=[\s,.!?;:\-—()"]|$)/i;
+
+function cleanDescription(s) {
+  let t = String(s || '').replace(/\s+/g, ' ').trim();
+  let prev;
+  do {
+    prev = t;
+    t = t.replace(FILLER_RE, '').replace(LEAD_PREP, '').replace(/^[-–—:;,.]+/, '').trim();
+  } while (t !== prev);
+  return t;
+}
+
 function detectCurrencyAround(text, numStart, numEnd) {
   const before = text.slice(Math.max(0, numStart - 8), numStart);
   const after = text.slice(numEnd, numEnd + 10);
@@ -25,7 +47,7 @@ function detectCurrencyAround(text, numStart, numEnd) {
   for (const [re, code] of CURRENCY_WORDS) {
     if (re.test(after) || re.test(before)) return code;
   }
-  // Glued single letters: "450р", "900с"? "с" is too ambiguous, skip it.
+  // Glued single letters: "450р". "с" is too ambiguous, skip it.
   if (/^[рp]\b/i.test(gluedAfter) || /^[рp]$/i.test(gluedAfter.trim())) return 'RUB';
   return null;
 }
@@ -36,8 +58,6 @@ function findNumbers(text) {
   const out = [];
   let m;
   while ((m = re.exec(text)) !== null) {
-    // Skip numbers that are part of words like "covid19"? Keep simple: require
-    // boundaries (space/start/end or currency symbol).
     out.push({ raw: m[0], start: m.index, end: m.index + m[0].length });
   }
   return out;
@@ -49,13 +69,12 @@ function parseNumberSafe(raw) {
   return Number.isFinite(v) ? v : NaN;
 }
 
-function stripRange(text, start, end, extraChars = 0) {
+function stripRange(text, start, end) {
   // Remove number + adjacent currency word to get a clean description.
   let s = text.slice(0, start) + ' ' + text.slice(end);
   // Remove one adjacent currency token (word form) left after number removal.
   s = s.replace(/сомони|сомон|смн|рублей|рубля|руб\.?|\b(rub|usd|eur|tjs)\b|[$€₽]/gi, ' ');
   s = s.replace(/\s+/g, ' ').trim();
-  // Remove stray leading/trailing prepositions left by removal: keep simple.
   return s.replace(/^[-–—:;,.]+|[-–—:;,.]+$/g, '').trim();
 }
 
@@ -64,25 +83,23 @@ function title1(s) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-/**
- * Parse one expense message.
- * @param {string} text e.g. "кофе 350", "такси 900 работа", "$12 lunch"
- * @param {{defaultCurrency?:string, baseCurrency?:string, rates?:Record<string,number>}} opts
- * @returns {{ok:boolean, error?:string, amount?:number, currency?:string,
- *   amountBase?:number, baseCurrency?:string, description?:string, category?:string}}
- */
-function parseExpense(text, opts = {}) {
+function normOpts(opts = {}) {
   const defaultCurrency = (opts.defaultCurrency || 'TJS').toUpperCase();
   const baseCurrency = (opts.baseCurrency || defaultCurrency).toUpperCase();
   const rates = opts.rates || {};
+  return { defaultCurrency, baseCurrency, rates };
+}
+
+/**
+ * Extract just the money part from free text. Used by the step-by-step
+ * dialog ("Сколько потратили?") where description comes separately.
+ */
+function extractAmount(text, opts = {}) {
+  const { defaultCurrency, baseCurrency, rates } = normOpts(opts);
   const input = String(text || '').replace(/\s+/g, ' ').trim();
-  if (!input || input.startsWith('/')) {
-    return { ok: false, error: 'Похоже на команду. Напишите сумму и описание, например: кофе 350' };
-  }
+  if (!input) return { ok: false, error: 'Напишите сумму, например: 350' };
   const nums = findNumbers(input);
-  if (nums.length === 0) {
-    return { ok: false, error: 'Не вижу сумму. Например: кофе 350' };
-  }
+  if (nums.length === 0) return { ok: false, error: 'Не вижу сумму. Например: 350' };
   // Prefer a number with an explicit currency marker, else the LAST number
   // ("2 кофе 350" -> 350, not 2).
   let chosen = null;
@@ -94,19 +111,66 @@ function parseExpense(text, opts = {}) {
   if (!chosen) chosen = nums[nums.length - 1];
   const amount = parseNumberSafe(chosen.raw);
   if (!Number.isFinite(amount) || amount <= 0 || amount > 1e9) {
-    return { ok: false, error: 'Сумма выглядит странно. Например: кофе 350' };
+    return { ok: false, error: 'Сумма выглядит странно. Например: 350' };
   }
   const currency = (chosenCurrency || defaultCurrency).toUpperCase();
   const rate = Number(rates[currency] ?? (currency === baseCurrency ? 1 : NaN));
   if (!Number.isFinite(rate)) {
     return { ok: false, error: `Не знаю курс ${currency}. Проверьте RATES_JSON.` };
   }
-  const amountBase = Math.round(amount * rate * 100) / 100;
-  let description = stripRange(input, chosen.start, chosen.end);
+  return {
+    ok: true,
+    amount,
+    currency,
+    amountBase: Math.round(amount * rate * 100) / 100,
+    baseCurrency,
+    start: chosen.start,
+    end: chosen.end,
+  };
+}
+
+/**
+ * Parse one expense message.
+ * e.g. "кофе 350", "такси 900 работа", "$12 lunch", "потратил 500 на такси"
+ */
+function parseExpense(text, opts = {}) {
+  const input = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!input || input.startsWith('/')) {
+    return { ok: false, error: 'Похоже на команду. Напишите сумму и описание, например: кофе 350' };
+  }
+  const a = extractAmount(input, opts);
+  if (!a.ok) {
+    return input.match(/\d/)
+      ? { ok: false, error: a.error }
+      : { ok: false, error: 'Не вижу сумму. Например: кофе 350' };
+  }
+  let description = cleanDescription(stripRange(input, a.start, a.end));
   const category = detectCategory(description || input);
   if (!description) description = require('./categories').getCategory(category).label;
   description = title1(description).slice(0, 200);
-  return { ok: true, amount, currency, amountBase, baseCurrency, description, category };
+  return {
+    ok: true,
+    amount: a.amount,
+    currency: a.currency,
+    amountBase: a.amountBase,
+    baseCurrency: a.baseCurrency,
+    description,
+    category,
+  };
+}
+
+/**
+ * Split "кофе 350 и такси 900" / "кофе 350, такси 900" into parts.
+ * Returns null when it's a single expense ("2 кофе 350" has no separator).
+ */
+function splitExpenseParts(text) {
+  const parts = String(text || '')
+    .split(/\s*(?:[;,]|[+×]|\n)\s*|\s+(?:и|а|плюс|еще|ещё)\s+/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (parts.length < 2 || parts.length > 5) return null;
+  if (!parts.every((p) => /\d/.test(p))) return null;
+  return parts;
 }
 
 function formatMoney(amount, currency) {
@@ -117,4 +181,4 @@ function formatMoney(amount, currency) {
   return `${str} ${currency}`;
 }
 
-module.exports = { parseExpense, formatMoney };
+module.exports = { parseExpense, extractAmount, splitExpenseParts, cleanDescription, formatMoney };

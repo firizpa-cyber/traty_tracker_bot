@@ -114,4 +114,4 @@ function detectCategory(text) {
   return 'other';
 }
 
-module.exports = { CATEGORIES, getCategory, detectCategory, tokensOf };
+module.exports = { CATEGORIES, getCategory, detectCategory, tokensOf, norm };
