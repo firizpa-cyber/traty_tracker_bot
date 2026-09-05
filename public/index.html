@@ -3,18 +3,24 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Расходы — панель</title>
+  <title>Расходы — мини-приложение</title>
   <link rel="stylesheet" href="/styles.css" />
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
   <div id="login" class="screen hidden">
-    <div class="card login-card">
-      <h1>💸 Расходы</h1>
-      <p class="muted">Трекер, который живёт в Telegram. Войдите через тот же аккаунт — без паролей.</p>
+    <div class="login-wrap">
+      <div class="logo">💸</div>
+      <h1>Расходы</h1>
+      <p class="muted">Сколько уходит и на что — за 10 секунд в день</p>
+      <div class="feat">
+        <div>✍️ <b>Одна строка</b> — «кофе 350», и трата записана</div>
+        <div>📊 <b>Графики</b> — дни, категории, итоги месяца</div>
+        <div>🔒 <b>Без пароля</b> — вход через ваш Telegram</div>
+      </div>
       <div id="tg-login"></div>
       <button id="btn-magic" class="btn secondary">Как войти? Нужна ссылка из бота</button>
-      <p id="magic-hint" class="muted hidden">Откройте бота и отправьте <code>/app</code> — он пришлёт ссылку вида <code>…/?token=…</code>. Откройте её на этом устройстве.</p>
+      <p id="magic-hint" class="muted small hidden">Откройте бота и отправьте <code>/app</code> — он пришлёт ссылку вида <code>…/?token=…</code>. Откройте её на этом устройстве.</p>
       <button id="btn-dev" class="btn ghost hidden">Войти как Dev (только локально)</button>
       <p id="login-err" class="err"></p>
     </div>
@@ -22,59 +28,83 @@
 
   <div id="app" class="screen hidden">
     <header class="top">
-      <div class="month-nav">
-        <button id="btn-prev" class="icon-btn" aria-label="Предыдущий месяц">‹</button>
-        <div>
-          <div id="month-label" class="month-label">—</div>
-          <div id="me-label" class="muted small">—</div>
-        </div>
-        <button id="btn-next" class="icon-btn" aria-label="Следующий месяц">›</button>
+      <button id="btn-prev" class="icon-btn" aria-label="Предыдущий месяц">‹</button>
+      <div class="top-title">
+        <div id="month-label" class="month-label">—</div>
+        <div id="me-label" class="muted small">—</div>
       </div>
-      <div class="top-actions">
-        <button id="btn-export" class="btn small">CSV</button>
-        <button id="btn-logout" class="btn small ghost">Выйти</button>
-      </div>
+      <button id="btn-next" class="icon-btn" aria-label="Следующий месяц">›</button>
+      <button id="btn-export" class="icon-btn" aria-label="Скачать CSV" title="Скачать CSV">⭳</button>
+      <button id="btn-logout" class="icon-btn ghost" aria-label="Выйти" title="Выйти">⏻</button>
     </header>
 
     <main class="wrap">
       <div id="expand-hint" class="hidden">⬆️ Потяните вверх, чтобы развернуть на весь экран</div>
+
+      <section class="hero">
+        <div class="hero-label">Потрачено <span id="hero-month">в этом месяце</span></div>
+        <div id="t-month" class="hero-val">—</div>
+        <div id="t-count" class="hero-sub muted">—</div>
+      </section>
+
       <section class="totals">
-        <div class="total-card"><div class="t-label">Сегодня</div><div id="t-today" class="t-val">—</div></div>
-        <div class="total-card"><div class="t-label">Неделя</div><div id="t-week" class="t-val">—</div></div>
-        <div class="total-card accent"><div class="t-label">Месяц</div><div id="t-month" class="t-val">—</div><div id="t-count" class="muted small">—</div></div>
+        <div class="total-card"><div class="t-label">Сегодня</div><div id="t-today" class="t-val">—</div><div class="t-sub">потрачено</div></div>
+        <div class="total-card"><div class="t-label">Неделя</div><div id="t-week" class="t-val">—</div><div class="t-sub">с понедельника</div></div>
+      </section>
+
+      <section id="onboarding" class="card guide hidden">
+        <h2>👋 Как это работает</h2>
+        <ol>
+          <li>Напишите трату строкой ниже — например <b>кофе 350</b></li>
+          <li>Категория определится сама, сумма попадёт в графики</li>
+          <li>В боте так же: одна строка — одна трата</li>
+        </ol>
+        <div class="muted small">Нажмите на пример, чтобы попробовать:</div>
       </section>
 
       <section class="card">
+        <h2>➕ Новая трата</h2>
+        <p class="card-sub">Сумма и что купили — одним сообщением</p>
         <form id="quick-form" class="quick">
-          <input id="quick-input" inputmode="text" autocomplete="off" placeholder="кофе 350  —  так же, как в боте" />
-          <button class="btn" type="submit">＋</button>
+          <input id="quick-input" inputmode="text" autocomplete="off" placeholder="кофе 350" />
+          <button class="btn" type="submit">Записать</button>
         </form>
-        <div class="muted small">Одним сообщением: сумма и описание. Категория определится сама.</div>
+        <div class="chips">
+          <button class="chip" data-ex="кофе 350">☕ кофе 350</button>
+          <button class="chip" data-ex="такси 900">🚕 такси 900</button>
+          <button class="chip" data-ex="обед 1 200">🍽 обед 1 200</button>
+          <button class="chip" data-ex="продукты 2 500">🛒 продукты 2 500</button>
+        </div>
         <div id="quick-err" class="err"></div>
       </section>
 
       <section class="card">
-        <h2>По дням</h2>
+        <h2>📊 По дням</h2>
+        <p class="card-sub">Каждый столбик — один день месяца</p>
         <canvas id="chart-days" height="140"></canvas>
-        <div id="days-empty" class="muted hidden">В этом месяце пока пусто.</div>
+        <div id="days-empty" class="empty hidden">Здесь появятся столбики, когда запишете первую трату 👆</div>
       </section>
 
       <section class="card">
         <div class="row-between">
-          <h2>По категориям</h2>
+          <div>
+            <h2>🗂 По категориям</h2>
+            <p class="card-sub">Доля от всех трат месяца</p>
+          </div>
           <button id="btn-limits" class="btn small secondary">Лимиты</button>
         </div>
         <div id="cats"></div>
         <div id="limits-form" class="hidden">
+          <p class="card-sub">Лимит на месяц в основной валюте. Бот предупредит, когда потратите 80% и при превышении.</p>
           <div id="limits-rows"></div>
           <button id="btn-limits-save" class="btn small">Сохранить лимиты</button>
-          <div class="muted small">Лимиты на месяц в базовой валюте. Бот предупредит при превышении 80% и 100%.</div>
         </div>
       </section>
 
       <section class="card">
-        <h2>Траты</h2>
-        <input id="search" placeholder="Поиск…" autocomplete="off" />
+        <h2>🧾 История</h2>
+        <p class="card-sub">Нажмите «Изменить», чтобы поправить запись</p>
+        <input id="search" placeholder="🔍 Поиск по записям…" autocomplete="off" />
         <div id="list"></div>
         <button id="btn-more" class="btn secondary hidden">Показать ещё</button>
       </section>
@@ -83,11 +113,18 @@
 
   <div id="modal" class="modal hidden">
     <div class="modal-card">
-      <h3>Изменить трату</h3>
+      <h3>Изменить запись</h3>
+      <label class="fld-label" for="m-text">Сумма и описание</label>
       <input id="m-text" placeholder="кофе 400" />
       <div class="row">
-        <select id="m-cat"></select>
-        <input id="m-day" type="date" />
+        <div class="fld">
+          <label class="fld-label" for="m-cat">Категория</label>
+          <select id="m-cat"></select>
+        </div>
+        <div class="fld">
+          <label class="fld-label" for="m-day">Дата</label>
+          <input id="m-day" type="date" />
+        </div>
       </div>
       <div id="m-err" class="err"></div>
       <div class="row-end">

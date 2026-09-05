@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node --test test/parse.test.js test/api.test.js test/auth.test.js"
+    "test": "node --test test/parse.test.js test/api.test.js test/auth.test.js test/frontend.test.js"
   },
   "engines": {
     "node": ">=22"

@@ -13,7 +13,11 @@ const state = {
 };
 
 function api(path, opts = {}) {
-  return fetch(path, {
+  // All API routes live under /api. Normalize so a missing prefix can never
+  // silently 404 again (Express serves index.html for unknown GETs and
+  // plain 404 for POST/PUT/PATCH/DELETE).
+  const url = path.startsWith('/api/') ? path : '/api' + (path.startsWith('/') ? path : `/${path}`);
+  return fetch(url, {
     ...opts,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}`, ...(opts.headers || {}) },
   }).then(async (r) => {
@@ -41,6 +45,20 @@ function shiftMonth(ym, d) {
   const [y, m] = ym.split('-').map(Number);
   const dt = new Date(y, m - 1 + d, 1);
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+}
+
+const CAT_COLORS = {
+  cafe: '#FF9F43', food: '#2ed573', transport: '#54a0ff', housing: '#a55eea',
+  comms: '#0fb9b1', health: '#ff6b81', clothes: '#f368e0', fun: '#fed330',
+  work: '#48dbfb', other: '#8395a7',
+};
+function catColor(id) { return CAT_COLORS[id] || CAT_COLORS.other; }
+
+function plural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
 }
 
 /* ---------- login ---------- */
@@ -164,7 +182,7 @@ function bind() {
     const text = $('quick-input').value.trim();
     if (!text) return;
     try {
-      await api('/expenses', { method: 'POST', body: JSON.stringify({ text }) });
+      await api('/api/expenses', { method: 'POST', body: JSON.stringify({ text }) });
       $('quick-input').value = '';
       trackQuickInput();
       haptic('success');
@@ -186,6 +204,14 @@ function bind() {
     renderLimitsEditor();
   };
   $('btn-limits-save').onclick = saveLimits;
+  document.querySelectorAll('.chip').forEach((c) => {
+    c.onclick = () => {
+      $('quick-input').value = c.dataset.ex;
+      $('quick-input').focus();
+      trackQuickInput();
+      haptic('light');
+    };
+  });
 }
 
 function monthBounds(ym) {
@@ -207,7 +233,12 @@ async function refresh() {
   $('t-today').textContent = fmt(sum.today.total, sum.baseCurrency);
   $('t-week').textContent = fmt(sum.week.total, sum.baseCurrency);
   $('t-month').textContent = fmt(sum.month.total, sum.baseCurrency);
-  $('t-count').textContent = `${sum.month.count} трат · ${from}…${to}`;
+  $('hero-month').textContent = `в ${monthLabel(state.month).toLowerCase()}`;
+  const n = sum.month.count;
+  $('t-count').textContent = n === 0
+    ? `Пока пусто — запишите первую трату ниже 👇`
+    : `${n} ${plural(n, 'запись', 'записи', 'записей')} · ${monthLabel(state.month).toLowerCase()}`;
+  $('onboarding').classList.toggle('hidden', n > 0);
   renderDays(byDay.days);
   renderCats(byCat.categories, sum.month.total);
   state.offset = 0;
@@ -216,6 +247,10 @@ async function refresh() {
 
 function renderDays(days) {
   const cv = $('chart-days');
+  const has = days.length > 0;
+  cv.style.display = has ? '' : 'none';
+  $('days-empty').classList.toggle('hidden', has);
+  if (!has) return;
   const map = Object.fromEntries(days.map((d) => [d.day, d.total]));
   const { from, to } = monthBounds(state.month);
   const vals = [];
@@ -249,7 +284,6 @@ function renderDays(days) {
       g.fillText(v.day.slice(8), x - 2, H - 6);
     }
   });
-  $('days-empty').classList.toggle('hidden', days.length > 0);
 }
 
 function renderCats(cats, monthTotal) {
@@ -264,12 +298,14 @@ function renderCats(cats, monthTotal) {
     const near = lim != null && !over && c.total > lim * 0.8;
     const row = document.createElement('div');
     row.className = 'cat-row';
+    const color = catColor(c.category);
     row.innerHTML =
-      `<div class="cat-top"><span>${c.emoji} ${c.label}</span><span>${fmt(c.total, state.baseCurrency)}</span></div>` +
-      `<div class="bar${over ? ' over' : ''}"><i style="width:${Math.min(100, pct)}%"></i></div>` +
-      `<div class="lim${over ? ' over' : ''}">${pct}% месяца` +
+      `<div class="cat-ico" style="background:${color}">${c.emoji}</div><div class="cat-body">` +
+      `<div class="cat-top"><span>${escapeHtml(c.label)}</span><span class="amt">${fmt(c.total, state.baseCurrency)}</span></div>` +
+      `<div class="bar"><i style="width:${Math.min(100, pct)}%;background:${over ? 'var(--danger)' : color}"></i></div>` +
+      `<div class="lim${over ? ' over' : ''}">${pct}% трат месяца` +
       (lim != null ? ` · лимит ${fmt(lim, state.baseCurrency)}${over ? ' — превышен!' : near ? ' — почти исчерпан' : ''}` : '') +
-      `</div>`;
+      `</div></div>`;
     box.appendChild(row);
   }
 }
@@ -304,7 +340,7 @@ function catEmoji(id) {
 
 async function delExpense(id) {
   if (!confirm(`Удалить трату #${id}?`)) return;
-  await api('/expenses/' + id, { method: 'DELETE' });
+  await api('/api/expenses/' + id, { method: 'DELETE' });
   haptic('success');
   refresh();
 }
@@ -330,12 +366,12 @@ async function saveModal() {
   const id = state.editingId;
   if (!id) return;
   try {
-    await api('/expenses/' + id, {
+    await api('/api/expenses/' + id, {
       method: 'PATCH',
       body: JSON.stringify({ text: $('m-text').value, category: $('m-cat').value, day: $('m-day').value || undefined }),
     }).catch(async () => {
       // Fallback: structured update if parser rejects combined text.
-      await api('/expenses/' + id, {
+      await api('/api/expenses/' + id, {
         method: 'PATCH',
         body: JSON.stringify({ description: $('m-text').value, category: $('m-cat').value, day: $('m-day').value || undefined }),
       });
@@ -373,7 +409,7 @@ async function saveLimits() {
     category: i.dataset.cat,
     amount: i.value === '' ? null : Number(i.value),
   }));
-  await api('/limits', { method: 'PUT', body: JSON.stringify({ limits: items }) });
+  await api('/api/limits', { method: 'PUT', body: JSON.stringify({ limits: items }) });
   $('limits-form').classList.add('hidden');
   refresh();
 }
