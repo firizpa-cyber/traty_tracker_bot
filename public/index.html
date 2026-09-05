@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Расходы — панель</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+  <div id="login" class="screen hidden">
+    <div class="card login-card">
+      <h1>💸 Расходы</h1>
+      <p class="muted">Трекер, который живёт в Telegram. Войдите через тот же аккаунт — без паролей.</p>
+      <div id="tg-login"></div>
+      <button id="btn-magic" class="btn secondary">Как войти? Нужна ссылка из бота</button>
+      <p id="magic-hint" class="muted hidden">Откройте бота и отправьте <code>/app</code> — он пришлёт ссылку вида <code>…/?token=…</code>. Откройте её на этом устройстве.</p>
+      <button id="btn-dev" class="btn ghost hidden">Войти как Dev (только локально)</button>
+      <p id="login-err" class="err"></p>
+    </div>
+  </div>
+
+  <div id="app" class="screen hidden">
+    <header class="top">
+      <div class="month-nav">
+        <button id="btn-prev" class="icon-btn" aria-label="Предыдущий месяц">‹</button>
+        <div>
+          <div id="month-label" class="month-label">—</div>
+          <div id="me-label" class="muted small">—</div>
+        </div>
+        <button id="btn-next" class="icon-btn" aria-label="Следующий месяц">›</button>
+      </div>
+      <div class="top-actions">
+        <button id="btn-export" class="btn small">CSV</button>
+        <button id="btn-logout" class="btn small ghost">Выйти</button>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <section class="totals">
+        <div class="total-card"><div class="t-label">Сегодня</div><div id="t-today" class="t-val">—</div></div>
+        <div class="total-card"><div class="t-label">Неделя</div><div id="t-week" class="t-val">—</div></div>
+        <div class="total-card accent"><div class="t-label">Месяц</div><div id="t-month" class="t-val">—</div><div id="t-count" class="muted small">—</div></div>
+      </section>
+
+      <section class="card">
+        <form id="quick-form" class="quick">
+          <input id="quick-input" inputmode="text" autocomplete="off" placeholder="кофе 350  —  так же, как в боте" />
+          <button class="btn" type="submit">＋</button>
+        </form>
+        <div class="muted small">Одним сообщением: сумма и описание. Категория определится сама.</div>
+        <div id="quick-err" class="err"></div>
+      </section>
+
+      <section class="card">
+        <h2>По дням</h2>
+        <canvas id="chart-days" height="140"></canvas>
+        <div id="days-empty" class="muted hidden">В этом месяце пока пусто.</div>
+      </section>
+
+      <section class="card">
+        <div class="row-between">
+          <h2>По категориям</h2>
+          <button id="btn-limits" class="btn small secondary">Лимиты</button>
+        </div>
+        <div id="cats"></div>
+        <div id="limits-form" class="hidden">
+          <div id="limits-rows"></div>
+          <button id="btn-limits-save" class="btn small">Сохранить лимиты</button>
+          <div class="muted small">Лимиты на месяц в базовой валюте. Бот предупредит при превышении 80% и 100%.</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Траты</h2>
+        <input id="search" placeholder="Поиск…" autocomplete="off" />
+        <div id="list"></div>
+        <button id="btn-more" class="btn secondary hidden">Показать ещё</button>
+      </section>
+    </main>
+  </div>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-card">
+      <h3>Изменить трату</h3>
+      <input id="m-text" placeholder="кофе 400" />
+      <div class="row">
+        <select id="m-cat"></select>
+        <input id="m-day" type="date" />
+      </div>
+      <div id="m-err" class="err"></div>
+      <div class="row-end">
+        <button id="m-cancel" class="btn ghost">Отмена</button>
+        <button id="m-save" class="btn">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

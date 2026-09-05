@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: expense-tracker
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: PUBLIC_URL
+        sync: false
+      - key: BOT_MODE
+        value: polling
+      - key: BASE_CURRENCY
+        value: TJS
+      - key: DEFAULT_CURRENCY
+        value: TJS
+      - key: RATES_JSON
+        value: '{"USD":10.9,"EUR":11.8,"RUB":0.12,"TJS":1}'
+      - key: TIMEZONE
+        value: Asia/Dushanbe
