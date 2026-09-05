@@ -45,6 +45,7 @@ function shiftMonth(ym, d) {
 
 /* ---------- login ---------- */
 async function boot() {
+  initTMA();
   const q = new URLSearchParams(location.search);
   const magic = q.get('token') || q.get('tg_token');
   if (magic) {
@@ -165,11 +166,15 @@ function bind() {
     try {
       await api('/expenses', { method: 'POST', body: JSON.stringify({ text }) });
       $('quick-input').value = '';
+      trackQuickInput();
+      haptic('success');
       refresh();
     } catch (err) {
       $('quick-err').textContent = err.message;
+      haptic('error');
     }
   };
+  $('quick-input').oninput = trackQuickInput;
   let t;
   $('search').oninput = (e) => {
     clearTimeout(t);
@@ -300,6 +305,7 @@ function catEmoji(id) {
 async function delExpense(id) {
   if (!confirm(`Удалить трату #${id}?`)) return;
   await api('/expenses/' + id, { method: 'DELETE' });
+  haptic('success');
   refresh();
 }
 
@@ -315,25 +321,33 @@ async function openModal(id) {
   $('m-day').value = e.day;
   $('m-err').textContent = '';
   $('modal').classList.remove('hidden');
-  $('m-cancel').onclick = () => $('modal').classList.add('hidden');
-  $('m-save').onclick = async () => {
-    try {
+  $('m-cancel').onclick = () => { $('modal').classList.add('hidden'); tmaModalHide(); };
+  $('m-save').onclick = saveModal;
+  tmaModalOpen(saveModal);
+}
+
+async function saveModal() {
+  const id = state.editingId;
+  if (!id) return;
+  try {
+    await api('/expenses/' + id, {
+      method: 'PATCH',
+      body: JSON.stringify({ text: $('m-text').value, category: $('m-cat').value, day: $('m-day').value || undefined }),
+    }).catch(async () => {
+      // Fallback: structured update if parser rejects combined text.
       await api('/expenses/' + id, {
         method: 'PATCH',
-        body: JSON.stringify({ text: $('m-text').value, category: $('m-cat').value, day: $('m-day').value || undefined }),
-      }).catch(async () => {
-        // Fallback: structured update if parser rejects combined text.
-        await api('/expenses/' + id, {
-          method: 'PATCH',
-          body: JSON.stringify({ description: $('m-text').value, category: $('m-cat').value, day: $('m-day').value || undefined }),
-        });
+        body: JSON.stringify({ description: $('m-text').value, category: $('m-cat').value, day: $('m-day').value || undefined }),
       });
-      $('modal').classList.add('hidden');
-      refresh();
-    } catch (err) {
-      $('m-err').textContent = err.message;
-    }
-  };
+    });
+    $('modal').classList.add('hidden');
+    tmaModalHide();
+    haptic('success');
+    refresh();
+  } catch (err) {
+    $('m-err').textContent = err.message;
+    haptic('error');
+  }
 }
 
 function renderLimitsEditor() {
@@ -366,6 +380,100 @@ async function saveLimits() {
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/* ---------- Telegram Mini App ---------- */
+const tg = (window.Telegram && window.Telegram.WebApp) || null;
+const inTMA = !!(tg && tg.initData);
+
+function initTMA() {
+  if (!inTMA) return;
+  document.body.classList.add('tma');
+  try {
+    tg.ready();
+    tg.expand(); // full height right away
+    applyTmaTheme();
+    if (tg.setHeaderColor) tg.setHeaderColor('bg_color');
+    if (tg.setBackgroundColor) tg.setBackgroundColor('bg_color');
+    if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
+    tg.onEvent('viewportChanged', onTmaViewport);
+    tg.onEvent('themeChanged', applyTmaTheme);
+    onTmaViewport();
+  } catch (_) {}
+}
+
+// Track expansion: tg.isExpanded + viewport height drive the layout.
+function onTmaViewport() {
+  if (!inTMA) return;
+  const h = `${tg.viewportHeight || window.innerHeight}px`;
+  document.documentElement.style.setProperty('--tma-vh', h);
+  const expanded = !!tg.isExpanded;
+  document.body.classList.toggle('expanded', expanded);
+  const hint = $('expand-hint');
+  if (hint) hint.classList.toggle('hidden', expanded);
+}
+
+// Native Telegram theme -> our CSS variables.
+function applyTmaTheme() {
+  if (!inTMA) return;
+  const p = tg.themeParams || {};
+  const map = {
+    bg_color: '--bg',
+    text_color: '--text',
+    hint_color: '--muted',
+    button_color: '--accent',
+    secondary_bg_color: '--card',
+  };
+  for (const [k, v] of Object.entries(map)) {
+    if (p[k]) document.documentElement.style.setProperty(v, p[k]);
+  }
+}
+
+function haptic(kind) {
+  try {
+    if (inTMA && tg.HapticFeedback) {
+      if (kind === 'success' || kind === 'error') tg.HapticFeedback.notificationOccurred(kind);
+      else tg.HapticFeedback.impactOccurred(kind || 'light');
+    }
+  } catch (_) {}
+}
+
+// Ask before closing with unsaved quick-add text.
+function trackQuickInput() {
+  if (!inTMA) return;
+  try {
+    if ($('quick-input').value.trim()) tg.enableClosingConfirmation();
+    else tg.disableClosingConfirmation();
+  } catch (_) {}
+}
+
+// Edit modal uses the native MainButton + BackButton inside Telegram.
+function tmaModalOpen(onSave) {
+  if (!inTMA) return;
+  try {
+    tmaModalSave.fn = onSave;
+    tg.MainButton.setText('Сохранить');
+    tg.MainButton.offClick(tmaModalSave);
+    tg.MainButton.onClick(tmaModalSave);
+    tg.MainButton.show();
+    tg.BackButton.offClick(tmaModalClose);
+    tg.BackButton.onClick(tmaModalClose);
+    tg.BackButton.show();
+  } catch (_) {}
+}
+function tmaModalSave() {
+  if (tmaModalSave.fn) tmaModalSave.fn();
+}
+function tmaModalClose() {
+  $('modal').classList.add('hidden');
+  tmaModalHide();
+}
+function tmaModalHide() {
+  if (!inTMA) return;
+  try {
+    tg.MainButton.hide();
+    tg.BackButton.hide();
+  } catch (_) {}
 }
 
 boot();

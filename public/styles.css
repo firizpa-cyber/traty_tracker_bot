@@ -92,6 +92,20 @@ input, select {
 .modal-card { background: var(--card); border-radius: 16px; padding: 16px; width: min(440px, 100%); }
 .modal-card h3 { margin: 0 0 10px; }
 
+/* ---------- Telegram Mini App ---------- */
+.tma .screen { min-height: var(--tma-vh, 100dvh); }
+.tma .top {
+  top: 0;
+  padding-top: calc(10px + env(safe-area-inset-top, 0px));
+}
+.tma .wrap { padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px)); }
+#expand-hint {
+  text-align: center; font-size: 13px; color: var(--muted);
+  background: rgba(127,140,160,.15); border-radius: 12px; padding: 8px;
+}
+/* In Telegram the native MainButton saves the form: hide the duplicate. */
+.tma #m-save { display: none; }
+
 @media (max-width: 520px) {
   .totals { grid-template-columns: 1fr 1fr; }
   .total-card.accent { grid-column: 1 / -1; }
